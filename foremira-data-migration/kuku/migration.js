@@ -3,7 +3,7 @@
 (() => {
  const KEY='kuku_preview_v5', MAX=1024*1024;
  const object=x=>x!==null && typeof x==='object' && !Array.isArray(x);
- const fail=()=>{throw new Error('対応していない、または壊れた学習データです。元の記録は変更していません。');};
+ const fail=()=>{throw new Error('この形式の記録はまだ保存できません。元の記録は変更していません。');};
  function fields(x,allowed){if(!object(x)||Object.keys(x).some(k=>!allowed.includes(k)))fail();}
  function number(x){if(typeof x!=='number'||!Number.isFinite(x)||x<0||x>1e15)fail();}
  function text(x){if(x!==null&&(typeof x!=='string'||x.length>1000))fail();}
@@ -11,10 +11,17 @@
   fields(s,['f','coins','streak','last','reward','settings','pet','dailyTask','economyVersion','lastTaskClear','taskStreak','learnHistory']);
   if(!object(s.f)||Object.keys(s.f).length!==81)fail();
   for(let a=1;a<=9;a++)for(let b=1;b<=9;b++){
-   const f=s.f[`${a}x${b}`]; fields(f,['a','b','l','d','at','ok','w','ms','ca','cok','cms']);
+   const f=s.f[`${a}x${b}`]; fields(f,['a','b','l','d','at','ok','w','ms','ca','cok','cms','learnTestScore','learnedOn','pendingLearn']);
    if(f.a!==a||f.b!==b||!Number.isInteger(f.l)||f.l < -1||f.l>20)fail();
    for(const k of ['d','at','ok','w','ms'])number(f[k]);
    for(const k of ['ca','cok','cms'])if(k in f)number(f[k]);
+   if('learnTestScore'in f&&(!Number.isInteger(f.learnTestScore)||f.learnTestScore<0||f.learnTestScore>9))fail();
+   if('learnedOn'in f){
+    if(typeof f.learnedOn!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(f.learnedOn))fail();
+    const date=new Date(f.learnedOn+'T00:00:00Z');
+    if(Number.isNaN(date.getTime())||date.toISOString().slice(0,10)!==f.learnedOn)fail();
+   }
+   if('pendingLearn'in f&&typeof f.pendingLearn!=='boolean')fail();
   }
   for(const k of ['coins','streak'])number(s[k]);
   for(const k of ['taskStreak','economyVersion'])if(k in s)number(s[k]);
@@ -24,7 +31,7 @@
   if('dailyGoal'in s.settings)number(s.settings.dailyGoal);
   if('showReadings'in s.settings&&typeof s.settings.showReadings!=='boolean')fail();
   fields(s.pet,['xp','branch','care','inv','log']); number(s.pet.xp);
-  if(![null,'study','play','food'].includes(s.pet.branch))fail();
+  if(![null,'study','play','food','balance'].includes(s.pet.branch))fail();
   fields(s.pet.care,['study','play','food']);for(const k of ['study','play','food'])number(s.pet.care[k]);
   fields(s.pet.inv,['food','toy','book','gem']);for(const k of ['food','toy','book','gem'])number(s.pet.inv[k]);
   if(!Array.isArray(s.pet.log)||s.pet.log.length>5000)fail();s.pet.log.forEach(text);
