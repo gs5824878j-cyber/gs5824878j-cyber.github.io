@@ -2,7 +2,7 @@
 Run beside the kuku-sodate checkout: python3 -m unittest discover -s tests -v
 Requires Python Playwright and /usr/bin/chromium.
 """
-import asyncio,json,tempfile,unittest
+import asyncio,json,tempfile,unittest,re
 from pathlib import Path
 from http.server import ThreadingHTTPServer,SimpleHTTPRequestHandler
 from functools import partial
@@ -28,7 +28,7 @@ class KukuRescueTest(unittest.TestCase):
         async with async_playwright() as p:
             browser=await p.chromium.launch(executable_path='/usr/bin/chromium',args=['--no-sandbox'])
             try:
-                for variant in ['current','legacy','empty','corrupt','unknown-field']:
+                for variant in ['current','legacy','learned','balanced','pending','empty','corrupt','unknown-field','invalid-score','invalid-date','invalid-pending']:
                     context=await browser.new_context(accept_downloads=True);page=await context.new_page();outbound=[];errors=[]
                     page.on('pageerror',lambda e:errors.append(str(e)))
                     async def route(r):
@@ -39,6 +39,31 @@ class KukuRescueTest(unittest.TestCase):
                     if variant=='current':
                         raw=await page.evaluate("() => {S.coins=123;S.pet.xp=160;S.f['2x3'].l=2;save();return localStorage.getItem('kuku_preview_v5')}")
                     elif variant=='legacy': raw=await page.evaluate('JSON.stringify(D())')
+                    elif variant=='learned':
+                        await page.get_by_role('button',name='📘 新しい段をおぼえる',exact=True).click()
+                        await page.get_by_role('button',name='2の段',exact=True).click()
+                        await page.get_by_role('button',name='覚えた！ 答えをかくす',exact=True).click()
+                        for i in range(9):
+                            q=await page.locator('#learn .v9-eq').inner_text();a,b=map(int,re.search(r'(\d+)\s*×\s*(\d+)',q).groups())
+                            await page.locator('#learnAnswerV9').fill(str(a*b));await page.locator('#learn').get_by_role('button',name='答える',exact=True).click()
+                            if i<8:await page.wait_for_function("document.getElementById('learnAnswerV9')?.value === ''")
+                            else:await page.wait_for_selector('#learnTestAnswerV9')
+                        for i in range(9):
+                            q=await page.locator('#learn .v9-eq').inner_text();a,b=map(int,re.search(r'(\d+)\s*×\s*(\d+)',q).groups())
+                            await page.locator('#learnTestAnswerV9').fill(str(a*b));await page.locator('#learn').get_by_role('button',name='答える',exact=True).click()
+                            if i<8:await page.wait_for_function("document.getElementById('learnTestAnswerV9')?.value === ''")
+                            else:await page.wait_for_function('S.learnHistory?.[2]?.passed === true')
+                        raw=await page.evaluate("localStorage.getItem('kuku_preview_v5')")
+                        fact=json.loads(raw)['f']['2x1'];self.assertEqual(fact['learnTestScore'],9);self.assertIn('learnedOn',fact);self.assertIs(fact['pendingLearn'],False)
+                    elif variant=='balanced':
+                        raw=await page.evaluate("() => {S.pet.xp=12;S.pet.care={study:4,play:4,food:4};S.pet.branch=null;branch();save();return localStorage.getItem('kuku_preview_v5')}")
+                        self.assertEqual(json.loads(raw)['pet']['branch'],'balance')
+                    elif variant in ['pending','invalid-score','invalid-date','invalid-pending']:
+                        data=await page.evaluate('D()');fact=data['f']['2x1'];fact.update(learnTestScore=8,learnedOn='2026-10-31',pendingLearn=True)
+                        if variant=='invalid-score':fact['learnTestScore']=10
+                        if variant=='invalid-date':fact['learnedOn']='2026-99-99'
+                        if variant=='invalid-pending':fact['pendingLearn']='false'
+                        raw=json.dumps(data)
                     elif variant=='empty': raw=None
                     elif variant=='corrupt': raw='{oops'
                     else:
@@ -50,7 +75,7 @@ class KukuRescueTest(unittest.TestCase):
                     self.assertEqual(await page.locator('#restore').count(),0)
                     self.assertEqual(await page.locator('#file').count(),0)
                     self.assertEqual(await page.locator('meta[name=robots]').get_attribute('content'),'noindex')
-                    if variant in ['current','legacy']:
+                    if variant in ['current','legacy','learned','balanced','pending']:
                         async with page.expect_download() as event:await page.locator('#export').click()
                         file=temp/(variant+'.json');await (await event.value).save_as(str(file));packet=json.loads(file.read_text())
                         self.assertEqual(packet['key'],KEY);self.assertEqual(packet['app'],'kuku-sodate');self.assertEqual(packet['version'],1);self.assertEqual(packet['data'],json.loads(raw))
